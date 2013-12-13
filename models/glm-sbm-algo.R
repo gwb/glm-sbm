@@ -1,83 +1,6 @@
 require(mc2d)
 require(VGAM)
 
-#N <- 15
-#K <- 3
-
-# creates a random symetrix matrix
-#M <- matrix(runif(K*K), nrow=K, ncol=K)
-#M <- M + t(M)
-#M <- M / max(M) * 0.9
-
-# the multinomial parameters
-#Theta <- rdirichlet(N, rep(1, K))
-
-# creates a random binary symetric matrix
-#Y <- matrix(runif(N*N), nrow=N, ncol=N)
-#Y <- Y + t(Y)
-#Y <- Y / max(Y)
-#Y <- round(Y)
-#diag(Y) <- 1
-
-#tau.0 <- rdirichlet(N, rep(1,K))
-
-
-
-gen.data <- function(N, m, theta){
-  ys <- NULL
-  zs <- apply(theta, 1, function(x) rmultinom(1, 1, x))
-  ks <- apply(apply(zs, 1:2, as.logical), 2, which) # the vector of assignments
-  for(i in seq(N)){
-    zi <- zs[,i]
-    for(j in seq(N)){
-      if(i < j){
-        zj <- zs[,j]
-        ys <- c(ys, rbern(1, t(zi) %*% m %*% zj))
-      }
-    }
-  }
-  y <- matrix(0, nrow=N, ncol=N)
-  y[lower.tri(y)] <- ys
-  y <- t(y)
-  y[lower.tri(y)] <- ys
-  diag(y) <- 1
-  return(list(y, ks))
-}
-
-get.true.empirical.m <- function(y, ks, K){
-  uks <- unique(ks)
-  empirical.m <- matrix(0, nrow=K, ncol=K)
-  for(i in seq(K)){
-    for(j in seq(K)){
-      if(i <= j){
-        if(i %in% ks && j %in% ks){
-          i.ind <- ks == i
-          j.ind <- ks == j
-          propensity <- sum(y[i.ind, j.ind]) / (sum(i.ind) * sum(j.ind))
-          empirical.m[i, j] <- propensity
-          empirical.m[j, i] <- propensity
-        } else {
-          empirical.m[i, j] <- 0.00001
-        }
-      }
-    }
-  }
-  return(empirical.m)
-}
-
-init.M <- function(K){
-  m <- matrix(0, nrow=K, ncol=K)
-  for(i in seq(K)){
-    for(j in seq(K)){
-      if(i <= j){
-        m[i,j] <- runif(1)
-        m[j,i] <- m[i,j]
-      }
-    }
-  }
-  return(m)
-}
-
 
 get.B <- function(q, l, m, yij){
   mql <- m[q,l]
@@ -92,27 +15,15 @@ setup.glm <- function(x, N, K){
 
 # POSTERIOR P(Z_i | ...) # # # # # # # # # 
 
-get.C <- function(i, q, tau, y, m, N, K){
-  res.cumul = 0
-  for(j in seq(N)){
-    if( j != i ){
-      for(l in seq(K)){
-        res.cumul <- res.cumul + tau[j,l] * log(get.B(q, l, m, y[i,j]))
-      }
-    }   
-  }
-  return(res.cumul)
-}
-
-
-get.R <- function(i, q, theta){
-  return(log(theta[i,q]))
-}
-
 
 get.tau.iq <- function(i, q, tau, y, m, theta, N, K){
-  C.iq <- get.C(i, q, tau, y, m, N, K)
-  R.iq <- get.R(i, q, theta)
+  C.iq <- 0
+  for( j in seq(N)[-i] ){
+    for(l in seq(K)){
+      C.iq <- C.iq + tau[j,l] * log(get.B(q,l,m, y[i,j]))
+    }
+  }
+  R.iq <- log(theta[i,q])
   return(exp(C.iq + R.iq))
 }
 
@@ -122,13 +33,6 @@ get.normtau.i <- function(i, tau, y, m, theta, N, K){
   return(unnorm.tau.i / sum(unnorm.tau.i))
 }
 
-#get.norm.tau <- function(tau, y, m, theta, N, K){
-#  new.tau <- NULL
-#  for(i in seq(N)){
-#    new.tau <- rbind(new.tau, get.normtau.i(i, tau, y, m, theta, N, K))
-#  }
-#  return(new.tau)
-#}
 
 get.norm.tau <- function(tau, y, m, theta, N, K){
   new.tau <- NULL
