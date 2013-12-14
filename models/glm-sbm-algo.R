@@ -16,43 +16,45 @@ setup.glm <- function(x, N, K){
 # POSTERIOR P(Z_i | ...) # # # # # # # # # 
 
 
-get.tau.iq <- function(i, q, tau, y, m, theta, N, K){
-  C.iq <- 0
-  for( j in seq(N)[-i] ){
-    for(l in seq(K)){
-      C.iq <- C.iq + tau[j,l] * log(get.B(q,l,m, y[i,j]))
-    }
-  }
-  R.iq <- log(theta[i,q])
-  return(exp(C.iq + R.iq))
-}
-
-get.normtau.i <- function(i, tau, y, m, theta, N, K){
-  unnorm.tau.i <- sapply(seq(K),
-                         function(q) get.tau.iq(i, q, tau, y, m, theta, N, K))
-  return(unnorm.tau.i / sum(unnorm.tau.i))
-}
-
-
-get.norm.tau <- function(tau, y, m, theta, N, K){
+update.tau.step <- function(tau, y, m, theta, N, K){
   new.tau <- NULL
   for(i in seq(N)){
-    tau[i,] <- get.normtau.i(i, tau, y, m, theta, N, K)
-    new.tau <- rbind(new.tau, tau[i,])
+    unnorm.tau.i <- NULL
+    for(q in seq(K)){  
+      # Tau[i,q] update has two components
+      # First component
+      C.iq <- 0
+      for( j in seq(N)[-i] ){
+        for(l in seq(K)){
+          C.iq <- C.iq + tau[j,l] * log(get.B(q,l,m, y[i,j]))
+        }
+      }
+      # Second component
+      R.iq <- log(theta[i,q])
+      unnorm.tau.i <- c(unnorm.tau.i, exp(C.iq + R.iq)) # Normalizing
+    }    
+    # Immediately update tau for following iterations
+    tau[i,] <- unnorm.tau.i / sum(unnorm.tau.i) 
   }
-  return(new.tau)
+  return(tau)
 }
 
-opt.tau <- function(tau, y, m, theta, N, K, tau.tol=0.0001){
+
+update.tau <- function(tau, y, m, theta, N, K, tau.tol=0.0001, tau.maxiter=100){
   old.tau <- tau
   new.tau <- 0 * tau
   err <- NULL
   current.err <- 1
+  i <- 0
   while(current.err > tau.tol){
     new.tau <- get.norm.tau(old.tau, y, m, theta, N, K)
-    current.err <- sum( (new.tau - old.tau)^2 )
+    current.err <- max((new.tau - old.tau)^2 / old.tau)
     err <- c(err, current.err)
     old.tau <- new.tau
+    i <- i + 1
+    if(i >= tau.maxiter){
+      break
+    }
   }
   return(list(new.tau, err))
 }
@@ -60,7 +62,7 @@ opt.tau <- function(tau, y, m, theta, N, K, tau.tol=0.0001){
 
 # Maximization of M given posterior
 
-get.H <- function(m, y, tau, N, K){
+eval.M.factor <- function(m, y, tau, N, K){
   cumul.res <- 0
   for(i in seq(N)){
     for(j in seq(N)){
@@ -76,28 +78,6 @@ get.H <- function(m, y, tau, N, K){
   return(cumul.res)
 }
 
-get.fit.H <- function(y, tau, N, K){
-  f <- function(m.ls){
-    m <- matrix(0, nrow=K, ncol=K)
-    m[upper.tri(m, diag=T)] <- m.ls
-    m <- t(m)
-    m[upper.tri(m, diag=T)] <- m.ls
-    return(get.H(m, y, tau, N, K))
-  }
-  return(f)
-}
-
-
-#opt.M <- function(init.par, y, tau, N, K, tol=0.0001){
-#  fit.H <- get.fit.H(y, tau, N, K)
-#  res <- optim(init.par, fit.H, control=list(fnscale=-1, maxit=5000,reltol=tol))
-#  m.ls <- res$par
-#  m <- matrix(0, nrow=K, ncol=K)
-#  m[upper.tri(m, diag=T)] <- m.ls
-#  m <- t(m)
-#  m[upper.tri(m, diag=T)] <- m.ls
-#  return(list(m, res$value))
-#}
 
 get.M.kl.update <- function(k,l,tau, y, N){
   num.kl <- 0
@@ -121,6 +101,18 @@ rectify.M <- function(m.val){
     m.val <- 0.001
   }
   return(m.val)
+}
+
+opt.M <- function(y, tau, N, K){
+  new.M <- matrix(0, nrow=K, ncol=K)
+  for(k in seq(K)){
+    for(l in seq(K)){
+      if(k <= l){
+
+      }
+    }
+  }
+
 }
 
 opt.M <- function(y, tau, N, K){
