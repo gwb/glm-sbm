@@ -56,7 +56,7 @@ update.tau <- function(tau, y, m, theta, N, K, tau.tol=0.0001, tau.maxiter=100){
       break
     }
   }
-  return(list(new.tau, err))
+  return(list(tau=new.tau, err=err))
 }
 
 
@@ -78,21 +78,6 @@ eval.M.factor <- function(m, y, tau, N, K){
   return(cumul.res)
 }
 
-
-get.M.kl.update <- function(k,l,tau, y, N){
-  num.kl <- 0
-  denom.kl <- 0
-  for(i in seq(N)){
-    for(j in seq(N)){
-      if(i < j){
-        num.kl <- num.kl + tau[i,k] * tau[j,l] * y[i,j]
-        denom.kl <- denom.kl + tau[i,k] * tau[j,l]
-      }
-    }
-  }
-  return(num.kl / denom.kl)
-}
-
 rectify.M <- function(m.val){
   if(m.val > 0.999){
     m.val <- 0.99
@@ -108,85 +93,44 @@ opt.M <- function(y, tau, N, K){
   for(k in seq(K)){
     for(l in seq(K)){
       if(k <= l){
-
-      }
-    }
-  }
-
-}
-
-opt.M <- function(y, tau, N, K){
-  new.M <- matrix(0, nrow=K, ncol=K)
-  for(k in seq(K)){
-    for(l in seq(K)){
-      if(k <= l){
-        new.M[k,l] <- get.M.kl.update(k,l,tau,y,N)
-        new.M[k,l] <- rectify.M(new.M[k,l])
+        # Performs the [k,l] update
+        num.kl <- 0
+        denom.kl <- 0
+        for(i in seq(N)){
+          for(j in seq(N)){
+            if(i < j){
+              num.kl <- num.kl + tau[i,k] * tau[j,l] * y[i,j]
+              denom.kl <- denom.kl + tau[i,k] * tau[j,l]
+            }
+          }
+        }
+        new.M[k,l] <- rectify.M(num.kl / denom.kl)
         new.M[l,k] <- new.M[k,l]
       }
     }
   }
-  return(list(new.M, get.H(new.M, y, tau, N, K)))
+  return(list(m=new.M, log.lik=eval.M.factor(new.M, y, tau, N, K)))
 }
+
 
 # Maximization of J given the posterior
 
-#get.J <- function(theta, tau, N, K){
-#  cumul.res <- 0
-#  for(i in seq(N)){
-#    for(q in seq(K)){
-#      cumul.res <- cumul.res + tau[i,q] * log(theta[i,q])
-#    }
-#  }
-#  return(cumul.res)
-#}
-#
-#simplexify <- function(unconstrained.thet){
-#  expsum <- sum(exp(unconstrained.thet))
-#  return(sapply(unconstrained.thet, function(x) exp(x) / expsum))
-#}
-#
-#get.fit.J <- function(tau, N, K){
-#  f <- function(unconstrained.thet){
-#    unconstrained.thet.mat <- matrix(unconstrained.thet, nrow=N, byrow=T)
-#    theta <- t(apply(unconstrained.thet.mat, 1, simplexify))
-#    return(get.J(theta, tau, N, K))
-#  }
-#  return(f)
-#}
-#
-#
-#opt.J <- function(init.par, tau, N, K){
-#  fit.J <- get.fit.J(tau, N, K)
-#  res <- optim(init.par, fit.J, control=list(fnscale=-1, maxit=5000))
-#  unconstrained.thet.mat <- matrix(res$par, nrow=N, byrow=T)
-#  theta <- t(apply(unconstrained.thet.mat, 1, simplexify))
-#  return(theta)
-#}
-#
-
-tau.2.w <- function(tau){
-  return(as.vector(t(tau)))
-}
-
-glmfitted.2.theta <- function(glm.fitted, K, N){
-  return(glm.fitted[as.logical(rep(c(1,rep(0,K-1))), N),])
-}
-
-
 opt.J <- function(y.mod, x.mod, tau, N, K, glm.formula='y.mod~x.mod'){
-  w <- tau.2.w(tau)
+  w <- as.vector(t(tau)) # transforms taus into regression weights
   glm.formula <- formula(glm.formula)
   fit.res <- vglm(formula=glm.formula, family=multinomial, weights=w)
-  theta <- glmfitted.2.theta(fitted.values(fit.res), K, N)
+
+  # extracts the thetas from the regression results
+  theta <- fitted.values(fit.res)[as.logical(rep(c(1,rep(0,K-1))), N),]
   return(list(betas=fit.res@coefficients,  theta=theta, log.lik=logLik(fit.res)))
 }
 
 
 # Full Algo
 
-em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.tol=0.0001, maxiter=10, err.bound=0.01, glm.formula='y.mod~x.mod', burnin=20, max.up=4){
+em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.tol=0.0001, maxiter=10, err.bound=0.01, glm.formula='y.mod~x.mod', burnin=20, max.up=4, max.stop.iter=3){
 
+  # initialize containers and variables
   res <- list(tau=list(), m=list(), theta=list(), betas=list())
   tau <- tau.init
   m <- m.init
@@ -197,30 +141,26 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
   y.mod <- inputs.mods$ymod
   x.mod <- inputs.mods$xmod
 
+  # iterator control variables
   i <- 1
   old.lbound <- 1
   stop.iter = 0
   
-  while(stop.iter < 3){
-
+  while(stop.iter < max.stop.iter){
     cat("iterations: ", i, "\n")
 
-    #if(i == 15){
-    #  browser()
-    #}
-    
     # E step
-    E.res <- opt.tau(tau.init, y, m, theta, N, K, tau.tol)
-    tau <- E.res[[1]]
-    err <- E.res[[2]]
+    E.res <- update.tau(tau.init, y, m, theta, N, K, tau.tol)
+    tau <- E.res$tau
+    err <- E.res$err
 
-    
     # M step
-    #res.M <- opt.M(m[upper.tri(m, diag=T)], y, tau, N, K, M.tol)
     res.M <- opt.M(y, tau, N, K)
-    m <- res.M[[1]]
     res.J <- opt.J(y.mod, x.mod, tau, N, K, glm.formula)
+    m <- res.M$m
     theta <- res.J$theta
+
+    # Is it really the lower bound, isn't there some constant I forgot?
     l.bound <- res.J$log.lik + res.M[[2]]
     
     
@@ -255,7 +195,7 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
     i <- i + 1
     
     if(i >= maxiter){
-      stop.iter <- 3
+      stop.iter <- max.stop.iter
     }
   }
 
