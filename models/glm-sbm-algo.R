@@ -47,7 +47,7 @@ update.tau <- function(tau, y, m, theta, N, K, tau.tol=0.0001, tau.maxiter=100){
   current.err <- 1
   i <- 0
   while(current.err > tau.tol){
-    new.tau <- get.norm.tau(old.tau, y, m, theta, N, K)
+    new.tau <- update.tau.step(old.tau, y, m, theta, N, K)
     current.err <- max((new.tau - old.tau)^2 / old.tau)
     err <- c(err, current.err)
     old.tau <- new.tau
@@ -145,7 +145,7 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
   i <- 1
   old.lbound <- 1
   stop.iter = 0
-  
+
   while(stop.iter < max.stop.iter){
     cat("iterations: ", i, "\n")
 
@@ -162,7 +162,8 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
 
     # Is it really the lower bound, isn't there some constant I forgot?
     l.bound <- res.J$log.lik + res.M[[2]]
-    
+    cat("lower bound: ", l.bound, "\n")
+    cat("Bound Err: ", abs(l.bound - old.lbound), "\n")
     
     # logging
     res$tau <- c(res$tau, list(tau))
@@ -171,8 +172,9 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
     res$betas <- c(res$betas, list(res.J$betas))
 
 
-    cat("lower bound: ", l.bound, "\n")
+    # Managing delta displays and early exit
     if(i > 1){
+      # Monitor parameter change with iterations
       tau.err <- sum((res$tau[[i]] - res$tau[[i-1]])^2) / length(res$tau[[i-1]])
       m.err <- sum((res$m[[i]] - res$m[[i-1]])^2) / length(res$tau[[i-1]])
       betas.err <- sum((res$betas[[i]] - res$betas[[i-1]])^2) / length(res$tau[[i-1]])
@@ -180,27 +182,30 @@ em.algo <- function(tau.init, m.init, theta.init, y, x, N, K, M.tol=0.0001, tau.
       cat("M error:     ", m.err, "\n")
       cat("Betas error: ", betas.err, "\n")
 
+      # Early exit if lower bound stagnates
       if(abs(l.bound - old.lbound) < err.bound & i > burnin){
         stop.iter <- stop.iter + 1
       }
+
+      # Early exit if lower bound does not decrease (experimental)
+      # since variational has no such garantees. Mainly to avoid
+      # stagnation
       if(l.bound < old.lbound & i > burnin){
         stop.iter <- stop.iter + 1
-      }
-      
-      cat("Bound Err: ", abs(l.bound - old.lbound), "\n")
-      
+      }    
     }
 
-    old.lbound <- l.bound
-    i <- i + 1
-    
+    # Exit if exceeds max iterations
     if(i >= maxiter){
       stop.iter <- max.stop.iter
     }
-  }
 
-  return(res)
+    # iteration updates
+    old.lbound <- l.bound
+    i <- i + 1    
+  }
   
+  return(res)
 }
 
 
